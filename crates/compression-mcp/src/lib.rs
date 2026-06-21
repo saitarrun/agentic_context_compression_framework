@@ -12,6 +12,8 @@ pub mod integrated;
 
 pub use compressors::Compressor;
 pub use router::ContentRouter;
+pub use ccr::CcrBackend;
+pub use metrics::MetricsCollector;
 pub use mcp_types::{ContentType, CompressRequest, CompressResponse, MpcError};
 pub use signal_maps::{ShellSignalMap, FileOpsSignalMap, FetchSignalMap};
 pub use hook_client::{HookClient, HookConfig};
