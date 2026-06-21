@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="saitarrun/headroom_inspired_agentic_compression_framework"
+REPO="saitarrun/agentic_context_compression_framework"
 BINARY_NAME="compression-mcp"
 INSTALL_DIR="${INSTALL_DIR:-.local/bin}"
 GITHUB_API="https://api.github.com/repos/${REPO}"
