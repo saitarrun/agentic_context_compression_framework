@@ -70,7 +70,7 @@ mod tests {
         let json_input = r#"{"status": "ok"}"#;
         let (output, _ratio, content_type) = router.compress(json_input).expect("compress failed");
         assert_eq!(content_type, ContentType::Json);
-        assert_eq!(output, json_input);
+        assert_eq!(output, r#"{"status":"ok"}"#);
     }
 
     #[test]

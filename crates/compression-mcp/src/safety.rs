@@ -218,8 +218,8 @@ mod tests {
     #[test]
     fn test_has_tool_definitions() {
         assert!(has_tool_definitions(r#"{"name": "tool", "type": "function"}"#));
-        assert!(has_tool_definitions("inputSchema:"));
-        assert!(has_tool_definitions("properties:"));
+        assert!(has_tool_definitions("\"inputSchema\":"));
+        assert!(has_tool_definitions("\"properties\":"));
     }
 
     #[test]

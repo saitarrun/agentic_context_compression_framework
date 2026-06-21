@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_kompress_base_removes_duplicates() {
-        let compressor = KompressBase;
+        let compressor = KompressBase::new();
         let input = "line 1\nline 1\nline 2\nline 1\nline 3\n";
         let (output, ratio) = compressor.compress(input).expect("compress failed");
         assert!(!output.contains("line 1\nline 1"));
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_kompress_base_preserves_error_content() {
-        let compressor = KompressBase;
+        let compressor = KompressBase::new();
         let input = "Normal log line\nError: connection failed\nMore normal output\n";
         let (output, _) = compressor.compress(input).expect("compress failed");
         assert!(output.contains("Error"));

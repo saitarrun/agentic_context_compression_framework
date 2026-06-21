@@ -106,6 +106,24 @@ headroom_workload_reduction_percent {{}} {:.2}
             0.0
         };
 
+        // Format numbers with thousand separators
+        let format_number = |n: u64| {
+            let s = n.to_string();
+            let mut result = String::new();
+            let mut count = 0;
+            for c in s.chars().rev() {
+                if count > 0 && count % 3 == 0 {
+                    result.insert(0, ',');
+                }
+                result.insert(0, c);
+                count += 1;
+            }
+            result
+        };
+        let tokens_saved_fmt = format_number(snapshot.total_tokens_saved);
+        let compressions_fmt = format_number(snapshot.compressions_count);
+        let errors_fmt = format_number(snapshot.errors_count);
+
         format!(
             r#"# Compression Metrics Report
 
@@ -129,9 +147,9 @@ headroom_workload_reduction_percent {{}} {:.2}
 ## Insights
 {}
 "#,
-            snapshot.total_tokens_saved,
-            snapshot.compressions_count,
-            snapshot.errors_count,
+            tokens_saved_fmt,
+            compressions_fmt,
+            errors_fmt,
             snapshot.success_rate,
             snapshot.average_accuracy * 100.0,
             total_cost_saved,
@@ -149,7 +167,7 @@ headroom_workload_reduction_percent {{}} {:.2}
         let mut insights = Vec::new();
 
         // Token savings insight
-        if snapshot.total_tokens_saved > 100000 {
+        if snapshot.total_tokens_saved >= 100000 {
             insights.push("✓ Exceptional token savings: >100K tokens saved".to_string());
         } else if snapshot.total_tokens_saved > 50000 {
             insights.push("✓ Strong token savings: >50K tokens saved".to_string());

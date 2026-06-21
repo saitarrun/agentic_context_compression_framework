@@ -72,6 +72,7 @@ impl MetricsCollector {
     /// Record a compression error.
     pub fn record_error(&self) {
         self.errors_count.fetch_add(1, Ordering::Relaxed);
+        self.compressions_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record a compression error for a specific content type.

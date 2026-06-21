@@ -31,6 +31,11 @@ impl SmartCrusher {
             Value::Object(obj) => {
                 let mut compressed = serde_json::Map::new();
                 for (key, val) in obj {
+                    // Skip fields that are pure noise
+                    if Self::is_noise_field(key) {
+                        continue;
+                    }
+
                     // Check if this is a signal field or has signal content
                     if Self::is_signal_field(key) || !Self::is_noise_value(val) {
                         if let Some(compressed_val) = Self::compress_value(val) {
@@ -60,6 +65,13 @@ impl SmartCrusher {
             }
             _ => Some(value.clone()),
         }
+    }
+
+    /// Check if a field name itself is pure noise.
+    fn is_noise_field(field: &str) -> bool {
+        let lower = field.to_lowercase();
+        lower.contains("timestamp") || lower.contains("retry") || lower.contains("metadata")
+            || lower.contains("duration") || lower.contains("elapsed") || lower.contains("backoff")
     }
 
     /// Check if a field name is likely to contain signal (important data).

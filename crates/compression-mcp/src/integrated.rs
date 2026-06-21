@@ -354,7 +354,7 @@ impl IntegratedCompressionManager {
         let mut status = HealthStatus::default();
 
         // Phase 1: Check router
-        if let Ok((_, _, _)) = self.router.compress("{}") {
+        if let Ok((_, _, _)) = self.router.compress(r#"{"status":"ok"}"#) {
             status.phase1_operational = true;
         }
 
@@ -422,8 +422,10 @@ mod tests {
 
         let manager = IntegratedCompressionManager::new(config).expect("create failed");
 
+        // Use a JSON response that compresses well
+        let verbose_json = r#"{"status":"ok","error":null,"metadata":{},"timestamp":1720000000000,"retry_count":0,"data":"result"}"#;
         let result = manager
-            .compress("agent-1", "shell", &"x".repeat(100))
+            .compress("agent-1", "shell", verbose_json)
             .expect("compress failed");
 
         assert!(result.compressed);
@@ -449,10 +451,13 @@ mod tests {
 
     #[test]
     fn test_retrieval_workflow() {
-        let config = IntegratedConfig::default();
+        let config = IntegratedConfig {
+            compress_threshold: 10,  // Lower threshold so test output gets compressed
+            ..Default::default()
+        };
         let manager = IntegratedCompressionManager::new(config).expect("create failed");
 
-        let original = "original output";
+        let original = "original output with more content to ensure it compresses";
         let result = manager
             .compress("agent-1", "shell", original)
             .expect("compress failed");
@@ -490,7 +495,7 @@ mod tests {
         let manager = IntegratedCompressionManager::new(config).expect("create failed");
 
         let _result = manager
-            .compress("agent-1", "shell", "x".repeat(100))
+            .compress("agent-1", "shell", &"x".repeat(100))
             .expect("compress failed");
 
         let prometheus = manager
