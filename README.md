@@ -8,35 +8,43 @@ A production-ready **MCP server** for Claude Code that reduces agent token consu
 
 ## 🎯 Quick Start
 
-### Build the MCP Server
+### Option 1: Install Pre-Built Binary (Recommended)
+
+**One-command installation for macOS and Linux:**
 
 ```bash
-cd /tmp/headroom_inspired
+curl -fsSL https://raw.githubusercontent.com/saitarrun/agentic_context_compression_framework/main/scripts/install.sh | bash
+```
+
+This will:
+- ✅ Auto-detect your OS and architecture
+- ✅ Download the latest v0.1.0 binary
+- ✅ Verify checksums
+- ✅ Install to `~/.local/bin/`
+- ✅ Configure Claude Code automatically
+
+**Supported platforms:**
+- macOS 11+ (Intel x86_64 & Apple Silicon arm64)
+- Linux glibc (x86_64 & arm64)
+
+### Option 2: Build from Source
+
+```bash
+git clone https://github.com/saitarrun/agentic_context_compression_framework.git
+cd agentic_context_compression_framework
 cargo build --release
 ./target/release/compression-mcp
 ```
 
-The server starts on stdin/stdout (standard MCP protocol).
-
 ### Connect to Claude Code
 
-Add to `.claude/settings.json`:
+The install script configures this automatically, or add manually to `.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "headroom-compression": {
-      "command": "/path/to/compression-mcp"
-    }
-  },
-  "hooks": {
-    "after_tool_response": {
-      "command": "python",
-      "args": ["/usr/local/lib/headroom/hook.py"],
-      "environment": {
-        "HEADROOM_AUTO_COMPRESS": "true",
-        "HEADROOM_COMPRESS_THRESHOLD": "1000"
-      }
+      "command": "~/.local/bin/compression-mcp"
     }
   }
 }
