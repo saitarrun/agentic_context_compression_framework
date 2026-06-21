@@ -1,6 +1,5 @@
 use super::Compressor;
 use mcp_types::MpcError;
-use std::collections::HashSet;
 
 /// CodeCompressor: Code-specific compression.
 /// Preserves signal elements (function signatures, line numbers, error messages)
