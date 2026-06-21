@@ -4,8 +4,6 @@
 /// This module handles communication between Claude Code's hook system
 /// and the MCP compression server.
 
-use mcp_types::{CompressRequest, CompressResponse};
-use std::process::{Command, Stdio};
 use serde_json::json;
 
 /// Hook client for automatic compression
