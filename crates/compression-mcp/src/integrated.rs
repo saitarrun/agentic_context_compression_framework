@@ -13,7 +13,7 @@ use crate::{
     PersonalizationManager, PersistentStorageManager,
     HookClient, HookConfig, MetricsExporter,
 };
-use mcp_types::{ContentType, MpcError};
+use mcp_types::ContentType;
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
