@@ -1,7 +1,7 @@
 # Headroom-Inspired Agentic Compression Framework
 
 <p align="center">
-  <img src="assets/banner.jpg" alt="Agentic Context Compression Framework Banner" width="100%" />
+  <img src="assets/banner.png" alt="Agentic Context Compression Framework Banner" width="100%" />
 </p>
 
 [![GitHub Release](https://img.shields.io/github/v/release/saitarrun/agentic_context_compression_framework?style=flat-square&logo=github)](https://github.com/saitarrun/agentic_context_compression_framework/releases)
