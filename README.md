@@ -1,5 +1,9 @@
 # Headroom-Inspired Agentic Compression Framework
 
+<p align="center">
+  <img src="assets/banner.jpg" alt="Agentic Context Compression Framework Banner" width="100%" />
+</p>
+
 [![GitHub Release](https://img.shields.io/github/v/release/saitarrun/agentic_context_compression_framework?style=flat-square&logo=github)](https://github.com/saitarrun/agentic_context_compression_framework/releases)
 [![GitHub Stars](https://img.shields.io/github/stars/saitarrun/agentic_context_compression_framework?style=flat-square&logo=github)](https://github.com/saitarrun/agentic_context_compression_framework/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
