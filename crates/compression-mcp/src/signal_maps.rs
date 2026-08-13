@@ -206,6 +206,41 @@ impl FetchSignalMap {
     }
 }
 
+/// DualRubricFilter: LaMR-inspired multi-rubric observation filter (OpenReview 2025/2026).
+/// Partitions observation lines into:
+/// - Rubric 1 (Causal Evidence): Root cause errors, stack trace lines, panic locations.
+/// - Rubric 2 (Dependency Anchors): Imported types, interface references, definitions.
+/// Drops non-causal execution loop artifacts.
+pub struct DualRubricFilter;
+
+impl DualRubricFilter {
+    const CAUSAL_KEYWORDS: &'static [&'static str] = &[
+        "error", "exception", "fatal", "panic", "caused by", "failed", "segfault", "assertion failed",
+    ];
+
+    const DEPENDENCY_KEYWORDS: &'static [&'static str] = &[
+        "use ", "import ", "require(", "from ", "package ", "mod ", "extern crate",
+    ];
+
+    pub fn filter(content: &str) -> (Vec<String>, Vec<String>) {
+        let mut causal = Vec::new();
+        let mut dependencies = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_lowercase();
+
+            if Self::CAUSAL_KEYWORDS.iter().any(|k| lower.contains(k)) {
+                causal.push(trimmed.to_string());
+            } else if Self::DEPENDENCY_KEYWORDS.iter().any(|k| lower.starts_with(k)) {
+                dependencies.push(trimmed.to_string());
+            }
+        }
+
+        (causal, dependencies)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +293,15 @@ mod tests {
         assert!(output.contains("body"));
         assert!(!output.contains("x-request-id"));
         assert!(!output.contains("x-rate-limit"));
+    }
+
+    #[test]
+    fn test_dual_rubric_filter() {
+        let input = "import React from 'react';\nuse std::io;\nNormal log 1\nError: connection reset\nAssertion failed: x == y\nNormal log 2";
+        let (causal, deps) = DualRubricFilter::filter(input);
+        assert_eq!(causal.len(), 2);
+        assert_eq!(deps.len(), 2);
+        assert!(causal[0].contains("Error"));
+        assert!(deps[0].contains("import"));
     }
 }

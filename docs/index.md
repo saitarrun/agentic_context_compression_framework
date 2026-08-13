@@ -114,6 +114,9 @@ Tool Output → Type Detection → Compression → Safety Checks → Storage
 
 ## 📚 Documentation
 
+- [Research Foundation (RESEARCH.md)](./RESEARCH.md)
+- [System Architecture (ARCHITECTURE.md)](./ARCHITECTURE.md)
+- [Integration Guide (INTEGRATION.md)](./INTEGRATION.md)
 - [GitHub Repository](https://github.com/saitarrun/agentic_context_compression_framework)
 - [Full README](https://github.com/saitarrun/agentic_context_compression_framework/blob/main/README.md)
 - [Releases](https://github.com/saitarrun/agentic_context_compression_framework/releases)

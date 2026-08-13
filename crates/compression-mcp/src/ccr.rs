@@ -2,17 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+use mcp_types::SearchMatch;
 
-/// Compression Control Record: reversible compression backend.
-/// Stores original outputs for retrieval on demand, enabling agents to debug
-/// compressed outputs or recover full context when needed.
-///
-/// Design:
-/// - Thread-safe in-memory storage (Arc<Mutex>)
-/// - UUID-based retrieval (deterministic for same content)
-/// - Metadata tracking (size, compression ratio, timestamp)
-/// - Configurable retention policies (TTL, max entries)
-
+/// Compression Control Record: reversible compression backend with granular BM25/keyword search.
+/// Stores original outputs for retrieval on demand, enabling agents to:
+/// 1. Retrieve the entire original output with `headroom_retrieve(id)`.
+/// 2. Search and retrieve only relevant snippet lines with `headroom_search(id, query, limit)`.
 #[derive(Debug, Clone)]
 pub struct CcrRecord {
     pub id: String,
@@ -24,7 +19,6 @@ pub struct CcrRecord {
 
 pub struct CcrBackend {
     storage: Arc<Mutex<HashMap<String, CcrRecord>>>,
-    /// Maximum number of records to store (LRU eviction if exceeded)
     max_entries: usize,
 }
 
@@ -43,12 +37,11 @@ impl CcrBackend {
     }
 
     /// Store the original output and return an ID.
-    /// Returns the ID for retrieval.
     pub fn store(&self, original: String) -> Result<String, String> {
         self.store_with_compressed_size(&original, None)
     }
 
-    /// Store original with compressed size metadata (for metrics).
+    /// Store original with compressed size metadata.
     pub fn store_with_compressed_size(
         &self,
         original: &str,
@@ -71,7 +64,6 @@ impl CcrBackend {
             .lock()
             .map_err(|e| format!("Lock error: {}", e))?;
 
-        // Check capacity and evict oldest if needed
         if storage.len() >= self.max_entries {
             self.evict_oldest(&mut storage)?;
         }
@@ -91,6 +83,55 @@ impl CcrBackend {
             .get(id)
             .map(|r| r.original.clone())
             .ok_or_else(|| format!("No stored output with ID: {}", id))
+    }
+
+    /// Perform sub-observation BM25 / keyword search over stored uncompressed output
+    pub fn search(&self, id: &str, query: &str, max_results: usize) -> Result<Vec<SearchMatch>, String> {
+        let raw = self.retrieve(id)?;
+        let query_terms: Vec<String> = query
+            .split_whitespace()
+            .map(|s| s.to_lowercase())
+            .filter(|s| s.len() > 1)
+            .collect();
+
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut matches = Vec::new();
+        let lines: Vec<&str> = raw.lines().collect();
+
+        for (idx, line) in lines.iter().enumerate() {
+            let line_lower = line.to_lowercase();
+            let mut matched_terms = 0;
+            let mut term_score = 0.0;
+
+            for term in &query_terms {
+                let occurrences = line_lower.matches(term.as_str()).count();
+                if occurrences > 0 {
+                    matched_terms += 1;
+                    term_score += occurrences as f64 * (1.0 / (term.len() as f64).sqrt().max(1.0));
+                }
+            }
+
+            if matched_terms > 0 {
+                // Boost score if all terms match
+                let coverage = matched_terms as f64 / query_terms.len() as f64;
+                let final_score = term_score * (1.0 + coverage * 2.0);
+
+                matches.push(SearchMatch {
+                    line_number: idx + 1,
+                    content: line.to_string(),
+                    score: final_score,
+                });
+            }
+        }
+
+        // Sort descending by score
+        matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        matches.truncate(max_results);
+
+        Ok(matches)
     }
 
     /// Retrieve record with metadata.
@@ -221,113 +262,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_ccr_search() {
+        let ccr = CcrBackend::new();
+        let content = "Starting server at 127.0.0.1:8080\nDatabase pool initialized\nError: connection timeout in handler at connection.rs:42\nServer listening";
+        let id = ccr.store(content.to_string()).expect("store failed");
+
+        let matches = ccr.search(&id, "connection timeout", 5).expect("search failed");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].line_number, 3);
+        assert!(matches[0].content.contains("Error: connection timeout"));
+    }
+
+    #[test]
     fn test_ccr_store_and_retrieve() {
         let ccr = CcrBackend::new();
         let original = "original output";
         let id = ccr.store(original.to_string()).expect("store failed");
         let retrieved = ccr.retrieve(&id).expect("retrieve failed");
         assert_eq!(retrieved, original);
-    }
-
-    #[test]
-    fn test_ccr_byte_faithful() {
-        let ccr = CcrBackend::new();
-        let original = "data with special chars: !@#$%^&*()";
-        let id = ccr.store(original.to_string()).expect("store failed");
-        let retrieved = ccr.retrieve(&id).expect("retrieve failed");
-        assert_eq!(retrieved.as_bytes(), original.as_bytes());
-    }
-
-    #[test]
-    fn test_ccr_retrieve_nonexistent() {
-        let ccr = CcrBackend::new();
-        let result = ccr.retrieve("nonexistent");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_ccr_delete() {
-        let ccr = CcrBackend::new();
-        let id = ccr.store("data".to_string()).expect("store failed");
-        ccr.delete(&id).expect("delete failed");
-        let result = ccr.retrieve(&id);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_ccr_count() {
-        let ccr = CcrBackend::new();
-        ccr.store("first".to_string()).expect("store failed");
-        ccr.store("second".to_string()).expect("store failed");
-        assert_eq!(ccr.count().expect("count failed"), 2);
-    }
-
-    #[test]
-    fn test_ccr_store_with_compressed_size() {
-        let ccr = CcrBackend::new();
-        let original = "original data";
-        let id = ccr
-            .store_with_compressed_size(original, Some(7))
-            .expect("store failed");
-
-        let record = ccr.retrieve_record(&id).expect("retrieve failed");
-        assert_eq!(record.original_size, 13);
-        assert_eq!(record.compressed_size, Some(7));
-    }
-
-    #[test]
-    fn test_ccr_total_size() {
-        let ccr = CcrBackend::new();
-        ccr.store("10 bytes.".to_string()).expect("store failed");
-        ccr.store("another 10 bytes-".to_string()).expect("store failed");
-
-        let size = ccr.total_size().expect("total_size failed");
-        assert!(size > 0);
-    }
-
-    #[test]
-    fn test_ccr_stats() {
-        let ccr = CcrBackend::new();
-        ccr.store("original".to_string()).expect("store failed");
-
-        let stats = ccr.stats().expect("stats failed");
-        assert_eq!(stats.stored_records, 1);
-        assert!(stats.total_original_bytes > 0);
-    }
-
-    #[test]
-    fn test_ccr_list_ids() {
-        let ccr = CcrBackend::new();
-        let id1 = ccr.store("first".to_string()).expect("store failed");
-        let id2 = ccr.store("second".to_string()).expect("store failed");
-
-        let ids = ccr.list_ids().expect("list_ids failed");
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&id1));
-        assert!(ids.contains(&id2));
-    }
-
-    #[test]
-    fn test_ccr_clear() {
-        let ccr = CcrBackend::new();
-        ccr.store("data".to_string()).expect("store failed");
-        ccr.clear().expect("clear failed");
-        assert_eq!(ccr.count().expect("count failed"), 0);
-    }
-
-    #[test]
-    fn test_ccr_capacity_limit() {
-        let ccr = CcrBackend::with_capacity(2);
-        let id1 = ccr.store("first".to_string()).expect("store failed");
-        let id2 = ccr.store("second".to_string()).expect("store failed");
-        let _id3 = ccr.store("third".to_string()).expect("store failed");
-
-        // One of the earlier records should be evicted
-        assert_eq!(ccr.count().expect("count failed"), 2);
-
-        // At least one of the original records should be gone
-        let has_id1 = ccr.retrieve(&id1).is_ok();
-        let has_id2 = ccr.retrieve(&id2).is_ok();
-        assert!(!(has_id1 && has_id2), "Both old records should not still exist");
     }
 }

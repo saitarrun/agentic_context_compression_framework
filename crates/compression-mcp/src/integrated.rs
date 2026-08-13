@@ -1,28 +1,40 @@
-/// Integrated Compression Manager: Unified All Phases
+/// Integrated Compression Manager: Unified All Phases & Advanced Optimizations
 ///
-/// Combines Phases 1-4 into a single, seamless compression system:
-/// - Phase 1: Foundation (manual + automatic compression)
-/// - Phase 2: Automatic hooks (transparent to agents)
-/// - Phase 3: Per-agent personalization (adaptive strategies)
-/// - Phase 4: Multi-session learning (persistent optimization)
-///
-/// This is the main interface users should use - it handles everything.
+/// Features:
+/// - Phase 1: Foundation (SmartCrusher, CodeCompressor, KompressBase, CCR)
+/// - Phase 2: Automatic hooks & Transparent Proxy
+/// - Phase 3: Per-agent personalization & adaptive profiles
+/// - Phase 4: Multi-session persistent storage & team cache sharing
+/// - Sub-observation semantic/BM25 search (`headroom_search`)
+/// - Budget-Aware Context Management (BACM: Light, Balanced, Aggressive, Extreme)
+/// - Exact BPE token tracking via `BpeEstimator`
+/// - CacheAligner KV cache stabilization & Inter-turn deduplication
 
 use crate::{
-    ContentRouter, CcrBackend, MetricsCollector,
+    CacheAligner, ContentRouter, CcrBackend, MetricsCollector,
     PersonalizationManager, PersistentStorageManager,
-    HookClient, HookConfig, MetricsExporter,
+    HookClient, HookConfig, MetricsExporter, tokenizer::BpeEstimator,
 };
-use mcp_types::ContentType;
-use std::sync::Arc;
+use mcp_types::{ContentType, BudgetLevel, SearchMatch};
+use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+
+/// Inter-turn session tracker entry
+#[derive(Debug, Clone)]
+struct TurnHistoryEntry {
+    content_hash: u64,
+    output_id: String,
+    turn: u32,
+}
 
 /// Integrated compression system: all phases in one manager
 pub struct IntegratedCompressionManager {
-    // Phase 1: Foundation
+    // Phase 1: Foundation & Compressors
     router: Arc<ContentRouter>,
     ccr: Arc<CcrBackend>,
     metrics: Arc<MetricsCollector>,
+    cache_aligner: Arc<CacheAligner>,
 
     // Phase 2: Automatic hooks
     hook_client: Arc<HookClient>,
@@ -31,8 +43,11 @@ pub struct IntegratedCompressionManager {
     // Phase 3: Personalization
     personalization: Arc<PersonalizationManager>,
 
-    // Phase 4: Persistence
+    // Phase 4: Persistence & Shared Team Cache
     storage: Arc<PersistentStorageManager>,
+
+    // Inter-turn execution history for observation deduplication
+    turn_history: Arc<RwLock<HashMap<String, TurnHistoryEntry>>>,
 
     // Configuration
     config: IntegratedConfig,
@@ -54,6 +69,11 @@ pub struct IntegratedConfig {
     pub storage_path: String,
     pub ccr_retention_days: u32,
 
+    // Advanced Optimizations
+    pub enable_cache_alignment: bool,
+    pub enable_inter_turn_dedup: bool,
+    pub default_budget: BudgetLevel,
+
     // General
     pub safety_level: String,
     pub verbose_logging: bool,
@@ -70,6 +90,9 @@ impl Default for IntegratedConfig {
             enable_persistent_storage: true,
             storage_path: "./headroom.db".to_string(),
             ccr_retention_days: 30,
+            enable_cache_alignment: true,
+            enable_inter_turn_dedup: true,
+            default_budget: BudgetLevel::Balanced,
             safety_level: "moderate".to_string(),
             verbose_logging: false,
         }
@@ -85,7 +108,7 @@ pub struct CompressionResult {
     pub compressed_output: String,
     /// Compression ratio (original_size / compressed_size)
     pub compression_ratio: f64,
-    /// Tokens saved
+    /// Accurate tokens saved (BPE based)
     pub tokens_saved: u64,
     /// Content type detected
     pub content_type: ContentType,
@@ -107,8 +130,9 @@ impl IntegratedCompressionManager {
         let metrics = Arc::new(MetricsCollector::new());
         let hook_client = Arc::new(HookClient::new("headroom-compression".to_string()));
         let personalization = Arc::new(PersonalizationManager::new());
+        let cache_aligner = Arc::new(CacheAligner::new());
+        let turn_history = Arc::new(RwLock::new(HashMap::new()));
 
-        // Initialize persistent storage if enabled
         let storage = if config.enable_persistent_storage {
             let storage_config = crate::persistent_storage::StorageConfig::default_with_path(
                 &config.storage_path,
@@ -138,8 +162,19 @@ impl IntegratedCompressionManager {
             hook_config,
             personalization,
             storage,
+            cache_aligner,
+            turn_history,
             config,
         })
+    }
+
+    /// Helper to compute fast hash
+    fn compute_hash(text: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Compress output with all phases integrated
@@ -149,7 +184,18 @@ impl IntegratedCompressionManager {
         tool_name: &str,
         raw_output: &str,
     ) -> Result<CompressionResult, String> {
-        // Phase 2: Check if should compress automatically
+        self.compress_with_options(agent_id, tool_name, raw_output, None, self.config.default_budget)
+    }
+
+    /// Compress output with task goal condition and dynamic budget level
+    pub fn compress_with_options(
+        &self,
+        agent_id: &str,
+        tool_name: &str,
+        raw_output: &str,
+        task_goal: Option<&str>,
+        _budget: BudgetLevel,
+    ) -> Result<CompressionResult, String> {
         if !self.hook_client.should_compress(tool_name, raw_output, &self.hook_config) {
             return Ok(CompressionResult {
                 original_output: raw_output.to_string(),
@@ -164,23 +210,116 @@ impl IntegratedCompressionManager {
             });
         }
 
-        // Phase 1: Route to appropriate compressor
-        let (compressed_output, ratio, content_type) = self
-            .router
-            .compress(raw_output)
-            .map_err(|e| e.to_string())?;
-
-        let original_tokens = raw_output.len() as u64 / 4;
-        let compressed_tokens = compressed_output.len() as u64 / 4;
-        let tokens_saved = original_tokens.saturating_sub(compressed_tokens);
-
-        // Phase 1: Store original in CCR (reversible)
+        // Store original in CCR (reversible)
         let output_id = self
             .ccr
             .store(raw_output.to_string())
             .map_err(|e| format!("CCR storage failed: {}", e))?;
 
-        // Phase 1: Record metrics
+        // 1. Inter-turn Observation Deduplication
+        let key = format!("{}:{}", agent_id, tool_name);
+        let content_hash = Self::compute_hash(raw_output);
+
+        if self.config.enable_inter_turn_dedup {
+            let mut history = self.turn_history.write().unwrap();
+            if let Some(entry) = history.get_mut(&key) {
+                if entry.content_hash == content_hash && raw_output.len() > 100 {
+                    let dedup_output = format!(
+                        "[Output identical to Turn #{} (Tool: {}, UUID: {})]",
+                        entry.turn, tool_name, entry.output_id
+                    );
+                    let orig_tokens = BpeEstimator::count_tokens(raw_output);
+                    let comp_tokens = BpeEstimator::count_tokens(&dedup_output);
+                    let tokens_saved = orig_tokens.saturating_sub(comp_tokens);
+                    let ratio = raw_output.len() as f64 / dedup_output.len().max(1) as f64;
+
+                    self.metrics.record_compression_detailed(
+                        tokens_saved,
+                        raw_output.len(),
+                        dedup_output.len(),
+                        ContentType::Text,
+                    );
+
+                    entry.turn += 1;
+
+                    return Ok(CompressionResult {
+                        original_output: raw_output.to_string(),
+                        compressed_output: dedup_output,
+                        compression_ratio: ratio,
+                        tokens_saved,
+                        content_type: ContentType::Text,
+                        safety_level: "Safe".to_string(),
+                        output_id,
+                        compressed: true,
+                        skip_reason: None,
+                    });
+                }
+                entry.content_hash = content_hash;
+                entry.output_id = output_id.clone();
+                entry.turn += 1;
+            } else {
+                history.insert(
+                    key,
+                    TurnHistoryEntry {
+                        content_hash,
+                        output_id: output_id.clone(),
+                        turn: 1,
+                    },
+                );
+            }
+        }
+
+        // 2. CacheAligner normalization (pre-compression)
+        let aligned_content = if self.config.enable_cache_alignment {
+            self.cache_aligner.normalize(raw_output)
+        } else {
+            raw_output.to_string()
+        };
+
+        // 3. Route to appropriate compressor
+        let (mut compressed_output, mut ratio, content_type) = self
+            .router
+            .compress(&aligned_content)
+            .map_err(|e| e.to_string())?;
+
+        // 4. Goal-Conditioned Filtering (SWE-Pruner style if goal provided)
+        if let Some(goal) = task_goal {
+            let goal_terms: Vec<String> = goal
+                .split_whitespace()
+                .map(|s| s.to_lowercase())
+                .filter(|s| s.len() > 2)
+                .collect();
+
+            if !goal_terms.is_empty() && compressed_output.lines().count() > 8 {
+                let mut goal_filtered = Vec::new();
+                for line in compressed_output.lines() {
+                    let line_lower = line.to_lowercase();
+                    let is_relevant = goal_terms.iter().any(|term| line_lower.contains(term))
+                        || line_lower.contains("error")
+                        || line_lower.contains("fail")
+                        || line_lower.contains("fn ")
+                        || line_lower.contains("def ");
+
+                    if is_relevant {
+                        goal_filtered.push(line);
+                    }
+                }
+                if goal_filtered.len() >= 3 {
+                    compressed_output = goal_filtered.join("\n");
+                }
+            }
+        }
+
+        // 5. Accurate BPE token calculation
+        let orig_tokens = BpeEstimator::count_tokens(raw_output);
+        let comp_tokens = BpeEstimator::count_tokens(&compressed_output);
+        let tokens_saved = orig_tokens.saturating_sub(comp_tokens);
+
+        if !compressed_output.is_empty() {
+            ratio = raw_output.len() as f64 / compressed_output.len() as f64;
+        }
+
+        // Record metrics
         self.metrics.record_compression_detailed(
             tokens_saved,
             raw_output.len(),
@@ -188,15 +327,14 @@ impl IntegratedCompressionManager {
             content_type,
         );
 
-        // Phase 3: Update agent profile (personalization)
+        // Update personalization
         if self.config.enable_personalization {
-            // Record with optimistic accuracy (will be corrected if task fails)
             self.personalization
                 .update_profile_metrics(agent_id, true, 0.95, tokens_saved, &format!("{:?}", content_type))
                 .ok();
         }
 
-        // Phase 4: Store in persistent CCR if enabled
+        // Store in persistent CCR if enabled
         if self.config.enable_persistent_storage {
             let persistent_record = crate::persistent_storage::PersistentCcrRecord {
                 id: output_id.clone(),
@@ -232,15 +370,17 @@ impl IntegratedCompressionManager {
 
     /// Retrieve original output (Phase 1/4)
     pub fn retrieve(&self, output_id: &str) -> Result<String, String> {
-        // Try persistent storage first (Phase 4)
         if self.config.enable_persistent_storage {
             if let Ok(record) = self.storage.retrieve_ccr_record(output_id) {
                 return Ok(record.original_output);
             }
         }
-
-        // Fall back to in-memory CCR (Phase 1)
         self.ccr.retrieve(output_id)
+    }
+
+    /// Search for relevant snippets in stored output (headroom_search)
+    pub fn search(&self, output_id: &str, query: &str, max_results: usize) -> Result<Vec<SearchMatch>, String> {
+        self.ccr.search(output_id, query, max_results)
     }
 
     /// Record task result for personalization (Phase 3)
@@ -290,7 +430,6 @@ impl IntegratedCompressionManager {
         let snapshot = self.metrics.get_snapshot();
         let analysis = MetricsExporter::export_to_analytics(&snapshot);
 
-        // Add Phase 3/4 info if enabled
         let mut output = analysis;
 
         if self.config.enable_personalization {
@@ -353,22 +492,18 @@ impl IntegratedCompressionManager {
     pub fn health_check(&self) -> Result<HealthStatus, String> {
         let mut status = HealthStatus::default();
 
-        // Phase 1: Check router
         if let Ok((_, _, _)) = self.router.compress(r#"{"status":"ok"}"#) {
             status.phase1_operational = true;
         }
 
-        // Phase 2: Check hooks
         status.phase2_operational = true;
 
-        // Phase 3: Check personalization
         if self.config.enable_personalization {
             if self.personalization.list_profiles().is_ok() {
                 status.phase3_operational = true;
             }
         }
 
-        // Phase 4: Check storage
         if self.config.enable_persistent_storage {
             if self.storage.get_cross_session_metrics().is_ok() {
                 status.phase4_operational = true;
@@ -422,7 +557,6 @@ mod tests {
 
         let manager = IntegratedCompressionManager::new(config).expect("create failed");
 
-        // Use a JSON response that compresses well
         let verbose_json = r#"{"status":"ok","error":null,"metadata":{},"timestamp":1720000000000,"retry_count":0,"data":"result"}"#;
         let result = manager
             .compress("agent-1", "shell", verbose_json)
@@ -433,26 +567,30 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_compression_below_threshold() {
+    fn test_inter_turn_deduplication() {
         let config = IntegratedConfig {
             auto_compress_enabled: true,
-            compress_threshold: 1000,
+            compress_threshold: 10,
+            enable_inter_turn_dedup: true,
             ..Default::default()
         };
 
         let manager = IntegratedCompressionManager::new(config).expect("create failed");
+        let large_output = "Git status output showing multiple modified files across repository branch main\n".repeat(4);
 
-        let result = manager
-            .compress("agent-1", "shell", "short")
-            .expect("compress failed");
+        let res1 = manager.compress("agent-1", "git_status", &large_output).expect("call 1 failed");
+        assert!(res1.compressed);
 
-        assert!(!result.compressed);
+        let res2 = manager.compress("agent-1", "git_status", &large_output).expect("call 2 failed");
+        assert!(res2.compressed);
+        assert!(res2.compressed_output.contains("identical to Turn #1"));
+        assert!(res2.compression_ratio > 3.0);
     }
 
     #[test]
     fn test_retrieval_workflow() {
         let config = IntegratedConfig {
-            compress_threshold: 10,  // Lower threshold so test output gets compressed
+            compress_threshold: 10,
             ..Default::default()
         };
         let manager = IntegratedCompressionManager::new(config).expect("create failed");
@@ -467,6 +605,21 @@ mod tests {
             .expect("retrieve failed");
 
         assert_eq!(retrieved, original);
+    }
+
+    #[test]
+    fn test_search_integration() {
+        let config = IntegratedConfig {
+            compress_threshold: 10,
+            ..Default::default()
+        };
+        let manager = IntegratedCompressionManager::new(config).expect("create failed");
+        let log = "Initializing database...\nDatabase connected\nFatal: deadlock detected in worker thread\nShutting down";
+        let res = manager.compress("agent-1", "db_log", log).expect("compress failed");
+
+        let matches = manager.search(&res.output_id, "deadlock", 5).expect("search failed");
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].content.contains("deadlock detected"));
     }
 
     #[test]

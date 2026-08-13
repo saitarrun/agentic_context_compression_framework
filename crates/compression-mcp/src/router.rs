@@ -14,8 +14,8 @@ impl ContentRouter {
     pub fn new() -> Self {
         let mut compressors: HashMap<ContentType, Arc<dyn Compressor>> = HashMap::new();
 
-        compressors.insert(ContentType::Json, Arc::new(SmartCrusher) as Arc<dyn Compressor>);
-        compressors.insert(ContentType::Code, Arc::new(CodeCompressor) as Arc<dyn Compressor>);
+        compressors.insert(ContentType::Json, Arc::new(SmartCrusher::new()) as Arc<dyn Compressor>);
+        compressors.insert(ContentType::Code, Arc::new(CodeCompressor::new()) as Arc<dyn Compressor>);
         compressors.insert(ContentType::Text, Arc::new(KompressBase::new()) as Arc<dyn Compressor>);
 
         Self { compressors }

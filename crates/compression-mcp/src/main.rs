@@ -1,12 +1,10 @@
-use compression_mcp::{ContentRouter, ccr::CcrBackend, metrics::MetricsCollector};
+use compression_mcp::{ContentRouter, ccr::CcrBackend, metrics::MetricsCollector, BpeEstimator};
 use mcp_types::{
-    CompressRequest, CompressResponse, RetrieveRequest, RetrieveResponse, StatsRequest,
-    StatsResponse,
+    CompressRequest, RetrieveRequest, SearchRequest, StatsRequest,
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use std::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Write server capabilities
     let init_response = json!({
         "type": "server_info",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "tools": [
             {
                 "name": "headroom_compress",
@@ -42,6 +40,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "raw_output": {
                             "type": "string",
                             "description": "Raw output from the tool to compress"
+                        },
+                        "task_goal": {
+                            "type": "string",
+                            "description": "Optional active agent goal to bias observation filtering"
+                        },
+                        "budget_level": {
+                            "type": "string",
+                            "description": "Optional budget level (light, balanced, aggressive, extreme)"
                         }
                     },
                     "required": ["tool_name", "raw_output"]
@@ -59,6 +65,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     },
                     "required": ["output_id"]
+                }
+            },
+            {
+                "name": "headroom_search",
+                "description": "Search and retrieve specific relevant lines from a stored output by ID",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "output_id": {
+                            "type": "string",
+                            "description": "ID of the stored output"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Keyword or diagnostic search query"
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Maximum matching lines to return (default: 5)"
+                        }
+                    },
+                    "required": ["output_id", "query"]
                 }
             },
             {
@@ -138,8 +166,8 @@ async fn handle_request(
                 .store(params.raw_output.clone())
                 .map_err(|e| e.to_string())?;
 
-            let original_tokens = params.raw_output.len() as u64 / 4; // Rough estimate
-            let compressed_tokens = compressed.len() as u64 / 4;
+            let original_tokens = BpeEstimator::count_tokens(&params.raw_output);
+            let compressed_tokens = BpeEstimator::count_tokens(&compressed);
             let tokens_saved = original_tokens.saturating_sub(compressed_tokens);
 
             metrics.record_compression(tokens_saved);
@@ -169,6 +197,26 @@ async fn handle_request(
             Ok(json!({
                 "result": {
                     "original_output": original
+                }
+            }))
+        }
+        Some("headroom_search") => {
+            let params = request
+                .get("params")
+                .ok_or("Missing params")?
+                .clone();
+            let params: SearchRequest =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+
+            let matches = ccr
+                .search(&params.output_id, &params.query, params.max_results)
+                .map_err(|e| e.to_string())?;
+
+            Ok(json!({
+                "result": {
+                    "output_id": params.output_id,
+                    "matches": matches,
+                    "total_matches": matches.len()
                 }
             }))
         }

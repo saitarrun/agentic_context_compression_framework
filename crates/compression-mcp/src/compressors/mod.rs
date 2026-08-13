@@ -1,6 +1,8 @@
+pub mod cache_aligner;
 pub mod smart_crusher;
 pub mod code_compressor;
 pub mod kompress_base;
+pub mod repo_map;
 
 use mcp_types::MpcError;
 
@@ -16,6 +18,8 @@ pub trait Compressor: Send + Sync {
 }
 
 // Re-export concrete implementations
+pub use cache_aligner::CacheAligner;
 pub use smart_crusher::SmartCrusher;
 pub use code_compressor::CodeCompressor;
 pub use kompress_base::KompressBase;
+pub use repo_map::RepoMapCompressor;

@@ -20,6 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         enable_persistent_storage: true,
         storage_path: "./headroom.db".to_string(),
         ccr_retention_days: 30,
+        enable_cache_alignment: true,
+        enable_inter_turn_dedup: true,
         safety_level: "moderate".to_string(),
         verbose_logging: false,
     };
@@ -98,14 +100,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "phase_1": "Foundation - Manual compression with CCR",
             "phase_2": "Automatic hooks - Transparent compression",
             "phase_3": "Personalization - Per-agent adaptive strategies",
-            "phase_4": "Persistence - Multi-session learning"
-        },
-        "capabilities": {
-            "compress": "Compress tool output with all phases",
-            "retrieve": "Retrieve original via CCR",
-            "metrics": "Get compression metrics",
-            "strategies": "Get personalized strategies",
-            "health": "Health check all phases"
+            "phase_4": "Multi-session - Persistent learning & optimization",
+            "cache_alignment": "KV Cache alignment & non-deterministic token normalization",
+            "inter_turn_dedup": "Observation deduplication across turns"
         }
     });
 
@@ -113,57 +110,112 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writer.write_all(b"\n").await?;
     writer.flush().await?;
 
-    // Read requests and handle (would implement full MCP protocol here)
+    // Main request loop
     let mut line = String::new();
-    while reader.read_line(&mut line).await? > 0 {
-        if let Ok(request) = serde_json::from_str::<serde_json::Value>(&line) {
-            let response = match request.get("method").and_then(|v| v.as_str()) {
-                Some("compress") => {
-                    let params = request.get("params").cloned().unwrap_or_default();
-                    match (
-                        params.get("agent_id").and_then(|v| v.as_str()),
-                        params.get("tool_name").and_then(|v| v.as_str()),
-                        params.get("raw_output").and_then(|v| v.as_str()),
-                    ) {
-                        (Some(a), Some(t), Some(o)) => {
-                            match manager.compress(a, t, o) {
-                                Ok(result) => json!({
-                                    "result": {
-                                        "output_id": result.output_id,
-                                        "compressed_output": result.compressed_output,
-                                        "compression_ratio": result.compression_ratio,
-                                        "tokens_saved": result.tokens_saved,
-                                        "content_type": format!("{:?}", result.content_type),
-                                    }
-                                }),
-                                Err(e) => json!({"error": e}),
-                            }
-                        }
-                        _ => json!({"error": "Missing parameters"}),
-                    }
-                }
-                Some("health") => {
-                    match manager.health_check() {
-                        Ok(status) => json!({
-                            "result": {
-                                "phase1": status.phase1_operational,
-                                "phase2": status.phase2_operational,
-                                "phase3": status.phase3_operational,
-                                "phase4": status.phase4_operational,
-                                "all_operational": status.all_operational,
-                            }
-                        }),
-                        Err(e) => json!({"error": e}),
-                    }
-                }
-                _ => json!({"error": "Unknown method"}),
-            };
-
-            writer.write_all(response.to_string().as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-            writer.flush().await?;
-        }
+    loop {
         line.clear();
+        let n = reader.read_line(&mut line).await?;
+        if n == 0 {
+            break;
+        }
+
+        let line_trimmed = line.trim();
+        if line_trimmed.is_empty() {
+            continue;
+        }
+
+        // Parse MCP request
+        if let Ok(request_json) = serde_json::from_str::<serde_json::Value>(line_trimmed) {
+            if let Some(tool) = request_json.get("tool").and_then(|t| t.as_str()) {
+                let response = match tool {
+                    "compress" => {
+                        let agent_id = request_json
+                            .get("agent_id")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("default");
+                        let tool_name = request_json
+                            .get("tool_name")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("unknown");
+                        let raw_output = request_json
+                            .get("raw_output")
+                            .and_then(|o| o.as_str())
+                            .unwrap_or("");
+
+                        match manager.compress(agent_id, tool_name, raw_output) {
+                            Ok(result) => json!({
+                                "status": "success",
+                                "output_id": result.output_id,
+                                "compressed_output": result.compressed_output,
+                                "compression_ratio": result.compression_ratio,
+                                "tokens_saved": result.tokens_saved,
+                                "content_type": format!("{:?}", result.content_type),
+                            }),
+                            Err(e) => json!({
+                                "status": "error",
+                                "message": e,
+                            }),
+                        }
+                    }
+                    "retrieve" => {
+                        let output_id = request_json
+                            .get("output_id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("");
+
+                        match manager.retrieve(output_id) {
+                            Ok(original) => json!({
+                                "status": "success",
+                                "original_output": original,
+                            }),
+                            Err(e) => json!({
+                                "status": "error",
+                                "message": e,
+                            }),
+                        }
+                    }
+                    "search" => {
+                        let output_id = request_json
+                            .get("output_id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("");
+                        let query = request_json
+                            .get("query")
+                            .and_then(|q| q.as_str())
+                            .unwrap_or("");
+                        let max_results = request_json
+                            .get("max_results")
+                            .and_then(|m| m.as_u64())
+                            .unwrap_or(5) as usize;
+
+                        match manager.search(output_id, query, max_results) {
+                            Ok(matches) => json!({
+                                "status": "success",
+                                "output_id": output_id,
+                                "matches": matches,
+                                "total_matches": matches.len()
+                            }),
+                            Err(e) => json!({
+                                "status": "error",
+                                "message": e,
+                            }),
+                        }
+                    }
+                    "stats" => json!({
+                        "status": "success",
+                        "metrics": manager.get_metrics_snapshot(),
+                    }),
+                    _ => json!({
+                        "status": "error",
+                        "message": format!("Unknown tool: {}", tool),
+                    }),
+                };
+
+                writer.write_all(response.to_string().as_bytes()).await?;
+                writer.write_all(b"\n").await?;
+                writer.flush().await?;
+            }
+        }
     }
 
     Ok(())

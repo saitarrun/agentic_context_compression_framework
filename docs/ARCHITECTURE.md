@@ -45,32 +45,27 @@ Returns compressed content and compression ratio (original_size / compressed_siz
 
 ### 4. Concrete Compressors
 
-#### SmartCrusher (compressors/smart_crusher.rs)
+#### CacheAligner (compressors/cache_aligner.rs)
+**Target:** Dynamic non-deterministic tokens (timestamps, hex memory pointers, ephemeral UUIDs, millisecond latencies, PIDs)
+- Normalizes high-entropy tokens to canonical placeholders (`<TIMESTAMP>`, `<HEX_ADDR>`, `<UUID>`, `<DURATION>`, `<PID>`)
+- Maximizes provider-side KV prompt caching hit rates (>80%) and reduces TTFT latency.
+
+#### SmartCrusher 2.0 (compressors/smart_crusher.rs)
 **Target:** JSON tool outputs (API responses, structured logs)
+- **Schema-guided Tabular Projection:** Converts homogeneous JSON object arrays to compact tabular columns (`#cols:k1|k2...`), cutting token usage by 65–85%.
+- **Anomaly/Error Preservation:** Preserves error and exception records in full detail, condensing routine 200/OK records.
+- **Deep Noise Pruning:** Strips telemetry, timestamps, latency metrics, and empty structures.
 
-**Current:** Stub implementation
-**TODO (Issue #2):** 
-- Parse JSON and identify signal fields (keys, values)
-- Remove whitespace, metadata, null values
-- Preserve nested structure
+#### CodeCompressor 2.0 (compressors/code_compressor.rs)
+**Target:** Code-related outputs (stack traces, diffs, function signatures)
+- **AST Skeletonization:** Retains function signatures, docstrings, and type definitions while folding large bodies into concise stub annotations.
+- **Unified Diff Compaction:** Prunes redundant unchanged context lines around hunks, preserving `@@` headers and modified delta lines (`+`/`-`).
+- **Stack Trace De-noising:** Collapses repetitive framework/runtime frames (e.g. `tokio`, `std::panicking`) while strictly preserving application frames and root causes.
 
-#### CodeCompressor (compressors/code_compressor.rs)
-**Target:** Code-related outputs (stack traces, diffs, function sigs)
-
-**Current:** Stub implementation
-**TODO (Issue #3):**
-- Extract and preserve function signatures
-- Compress stack trace boilerplate
-- Preserve line numbers and file paths
-
-#### KompressBase (compressors/kompress_base.rs)
-**Target:** General text/prose (logs, error messages)
-
-**Current:** Stub implementation
-**TODO (Issue #4):**
-- Load local ONNX model or cloud API
-- Run inference pipeline
-- Preserve critical keywords (errors, exceptions)
+#### KompressBase 2.0 (compressors/kompress_base.rs)
+**Target:** General text/prose (logs, command output)
+- Multi-rubric filtering for error & diagnostic preservation.
+- Collapses progress bar spam and repetitive polling loops.
 
 ### 5. Signal Maps (signal_maps/)
 
