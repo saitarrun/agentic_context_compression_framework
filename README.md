@@ -16,7 +16,7 @@
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
 - [Overview](#-overview)
 - [System Architecture & UML Diagrams](#-system-architecture--uml-diagrams)
@@ -37,7 +37,7 @@
 
 ---
 
-## ⚡ Overview
+## Overview
 
 When AI coding agents interact with development environments (running shells, reading files, querying APIs, executing tests), **85%–95% of tool outputs consist of structural overhead, timestamps, and redundant loop traces**. This causes:
 
@@ -49,7 +49,7 @@ The **Agentic Context Compression Framework** sits transparently between your to
 
 ---
 
-## 🏗️ System Architecture & UML Diagrams
+## System Architecture & UML Diagrams
 
 ### 1. System Flow Diagram
 
@@ -221,7 +221,7 @@ This framework incorporates the latest empirical findings from 2024–2026 liter
 
 ---
 
-## 🧩 Core Compression Modules
+## Core Compression Modules
 
 | Module | Location | Primary Function |
 | :--- | :--- | :--- |
@@ -237,7 +237,7 @@ This framework incorporates the latest empirical findings from 2024–2026 liter
 
 ---
 
-## 📊 Before & After Samples
+## Before & After Samples
 
 ### Sample 1: JSON Tabular Schema Projection (`SmartCrusher 2.0`)
 
@@ -428,7 +428,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-## 📡 Exposed MCP Tools & API Reference
+## Exposed MCP Tools & API Reference
 
 ### 1. `headroom_compress`
 Compresses tool output using content-aware algorithms.
@@ -514,7 +514,7 @@ Returns session and cumulative compression metrics (tokens saved, compression ra
 
 ---
 
-## 🧪 Running Tests & Quality Assurance
+## Running Tests & Quality Assurance
 
 Run the comprehensive integration test suite verifying all compressors, deduplication, search, and proxy:
 
@@ -531,7 +531,7 @@ cargo test test_cache_aligner_normalization
 
 ---
 
-## 📄 License & Citations
+## License & Citations
 
 Distributed under the **MIT License**. See `LICENSE` for details.
 
